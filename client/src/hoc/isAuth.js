@@ -1,8 +1,7 @@
 import React, {useEffect, useState} from 'react';
 import {verifyToken} from '../api/requests';
 import {SIGN_IN} from '../constants/routes'
-import {redirect, useNavigate} from 'react-router-dom';
-// import {redirect} from "react-router-dom";
+import {useNavigate} from 'react-router-dom';
 
 const checkToken = async () => {
     try {

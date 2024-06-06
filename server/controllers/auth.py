@@ -47,8 +47,7 @@ def verify_access_token(token: str) -> schemes.TokenData:
     return token_data
 
 
-def verify_token(db: Annotated[AsyncSession, Depends(get_async_session)],
-                 token: Annotated[str, Depends(oauth2_scheme)]):
+def verify_token(token: Annotated[str, Depends(oauth2_scheme)]):
     token = verify_access_token(token)
     return token
 

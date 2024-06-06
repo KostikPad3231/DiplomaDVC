@@ -33,6 +33,7 @@ export const Login = () => {
                 navigate(path.MAIN);
             }
         } catch (error) {
+            console.log(error);
             const errors = {};
             const errorData = error.response.data;
             for (const key in errorData) {
@@ -46,9 +47,9 @@ export const Login = () => {
     return (
         <>
             <Card className="my-3 w-25 mx-auto">
-                <Card.Header>
-                    {errors.non_field_errors && (
-                        <p className="link-danger">{errors.non_field_errors}</p>
+                <Card.Header className="text-center">
+                    {errors.detail && (
+                        <p className="link-danger m-0">{errors.detail}</p>
                     )}
                 </Card.Header>
                 <Card.Body>

@@ -8,5 +8,6 @@ export const VERIFY_TOKEN = BACKEND_URL + '/api/get-user';
 
 
 export const ROOMS = BACKEND_URL + '/api/rooms/';
+export const JOIN_ROOM = BACKEND_URL + '/api/rooms/join/';
 export const MESSAGES = BACKEND_URL + '/api/rooms/';
 export const SEND_MESSAGE = BACKEND_URL + '/api/rooms/';

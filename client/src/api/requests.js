@@ -50,10 +50,10 @@ export const getRooms = async (username) => {
     });
 };
 
-export const deleteRoom = async (boardId) => {
+export const deleteRoom = async (roomId) => {
     return axios({
         method: 'delete',
-        url: API_URL.BOARDS + boardId + '/',
+        url: API_URL.ROOMS + roomId + '/',
         headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
     });
 };
@@ -61,7 +61,16 @@ export const deleteRoom = async (boardId) => {
 export const createRoom = async (values) => {
     return axios({
         method: 'post',
-        url: API_URL.BOARDS,
+        url: API_URL.JOIN_ROOM,
+        headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
+        data: values,
+    });
+};
+
+export const joinRoom = async (values) => {
+    return axios({
+        method: 'post',
+        url: API_URL.JOIN_ROOM,
         headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
         data: values,
     });
