@@ -44,10 +44,10 @@ export const Main = (props) => {
                                 />
                             </Col>
                             <Col xs={4} className="full-height d-flex flex-column">
-                                <Chat
-                                    user={user}
-                                    roomId={roomId}
-                                />
+                                {/*<Chat*/}
+                                {/*    user={user}*/}
+                                {/*    roomId={roomId}*/}
+                                {/*/>*/}
                             </Col>
                         </>
                     )}

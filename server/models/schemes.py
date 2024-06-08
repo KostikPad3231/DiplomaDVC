@@ -74,3 +74,9 @@ class MessagesList(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     messages: list[MessageGet]
+
+
+class Offer(BaseModel):
+    sdp: str
+    type: str
+    video_transform: str | None
