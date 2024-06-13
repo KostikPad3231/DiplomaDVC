@@ -41,12 +41,11 @@ export const verifyToken = async () => {
     });
 };
 
-export const getRooms = async (username) => {
+export const getRooms = async () => {
     return axios({
         method: 'get',
         url: API_URL.ROOMS,
         headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
-        data: username
     });
 };
 
@@ -61,7 +60,7 @@ export const deleteRoom = async (roomId) => {
 export const createRoom = async (values) => {
     return axios({
         method: 'post',
-        url: API_URL.JOIN_ROOM,
+        url: API_URL.ROOMS,
         headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
         data: values,
     });

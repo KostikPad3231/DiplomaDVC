@@ -42,10 +42,6 @@ class RoomJoin(BaseModel):
     password: str
 
 
-class RoomCreate(Room):
-    password: str
-
-
 class RoomList(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

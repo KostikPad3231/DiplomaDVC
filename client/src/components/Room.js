@@ -1,23 +1,17 @@
-import Peer from 'simple-peer';
 import {useEffect, useRef, useState} from 'react';
 import {WEBSOCKET_URL} from "../constants";
-import {forEach} from "react-bootstrap/ElementChildren";
 
 export const Room = ({user, roomId}) => {
-    const [stream, setStream] = useState(null);
-    const [peers, setPeers] = useState(null);
-    const videoRef = useRef();
-    const processedVideoRef = useRef();
-    // const socket = useRef(new WebSocket(WEBSOCKET_URL + '/' + roomId.toString()));
-    const socket = useRef();
+    const [peers, setPeers] = useState([]);
 
-    useEffect(() => {
-        socket.current = new WebSocket(WEBSOCKET_URL);
-        if(peers){
-            processedVideoRef.current.srcObject = null;
-            peers.destroy();
-        }
-    }, [roomId]);
+    const [stream, setStream] = useState(null);
+    const videoRef = useRef(null);
+    const canvasRef = useRef();
+    const [processedImages, setProcessedImages] = useState({});
+    const [processedAudios, setProcessedAudios] = useState({});
+    const audioSocket = useRef();
+    const videoSocket = useRef();
+    const firstChunk = useRef(null);
 
     useEffect(() => {
         navigator.mediaDevices.getUserMedia({video: true, audio: true})
@@ -28,147 +22,144 @@ export const Room = ({user, roomId}) => {
                 }
             })
             .catch((error) => {
-                console.log(`Error in media device: ${error}`)
+                console.log(`Error accessing media devices: ${error}`)
             });
 
-        socket.current.onmessage = (message) => {
-            const data = JSON.parse(message.data);
-            console.log('on message');
-            console.log(data);
-            if(data.sdp){
-                peers.signal(data);
+        return () => {
+            if (audioSocket.current) {
+                console.log('closing socket');
+                audioSocket.current.close();
             }
-            // if (data.type === 'offer') {
-            //     handleOffer(data);
-            // } else if (data.type === 'answer') {
-            //     handleAnswer(data);
-            // } else if (data.type === 'new-peer') {
-            //     createNewPeer(data);
-            // } else if (data.type === 'candidate') {
-            //     handleCandidate(data);
-            // }
+            setProcessedImages({});
         }
-    }, [peers, roomId]);
+    }, [roomId]);
 
-    const handleOffer = (data) => {
-        const peer = new Peer({
-            initiator: false,
-            trickle: false,
-            stream: stream
-        });
+    const sendCombinedData = (header, content) => {
+        const headerBuffer = new TextEncoder().encode(header);
+        const headerLength = new Uint8Array([headerBuffer.length]);
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const frameBuffer = new Uint8Array(reader.result);
 
-        console.log(14);
+            const combinedBuffer = new Uint8Array(headerLength.length + headerBuffer.length + frameBuffer.length);
+            combinedBuffer.set(headerLength, 0);
+            combinedBuffer.set(headerBuffer, headerLength.length);
+            combinedBuffer.set(frameBuffer, headerLength.length + headerBuffer.length);
 
-        peer.on('signal', data => {
-            console.log(20);
-            socket.current.send(JSON.stringify(data));
-        });
+            audioSocket.current.send(combinedBuffer.buffer);
+        };
+        reader.readAsArrayBuffer(content);
+    }
 
-        console.log(15);
+    const handleMessage = async (message) => {
+        const data = new Uint8Array(message.data);
+        const userFromLength = data[0];
+        const userFrom = new TextDecoder().decode(data.slice(1, 1 + userFromLength));
+        const headerStart = 1 + userFromLength;
+        const headerLength = data[headerStart];
+        const header = new TextDecoder().decode(data.slice(headerStart + 1, headerStart + 1 + headerLength));
+        const contentStart = 1 + userFromLength;
+        const content = data.slice(contentStart);
 
-        peer.on('stream', stream => {
-            console.log(30);
-            addRemoteVideo(stream);
-        });
+        if (header === '0') {
+            const blob = new Blob([content], {type: 'image/jpeg'});
+            const image = new Image();
+            image.src = window.URL.createObjectURL(blob);
+            image.onload = () => {
+                setProcessedImages(images => (
+                    {...images, [userFrom]: image.src}
+                ));
+            };
+        } else if (header === '1') {
+            // const blob = new Blob([content], {type: 'audio/webm'})
+            // const audio = new Audio();
+            // audio.src = window.URL.createObjectURL(blob);
+            // audio.onload = () => {
+            //     console.log('success');
+            //     setProcessedAudios(audios => (
+            //         {...audios, [userFrom]: audio.src}
+            //     ));
+            // }
+            const blob = new Blob([...firstChunk.current, content], {type: 'audio/webm'})
+            const audioUrl = window.URL.createObjectURL(blob);
+            const audio = new Audio();
+            audio.src = audioUrl;
+            audio.addEventListener('canplaythrough', () => {
+                console.log('success');
+                audio.play();
+            });
+        }
+    }
 
-        console.log(16);
-
-        peer.signal(data);
-
-        console.log(17);
-        setPeers(peers => [...peers, peer]);
+    const sendFrame = () => {
+        const context = canvasRef.current.getContext('2d');
+        context.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
+        canvasRef.current.toBlob(blob => {
+            if (blob) {
+                sendCombinedData('0', blob);
+            }
+        }, 'image/jpeg');
     };
 
-    const handleAnswer = (data) => {
-        console.log('handle answer');
-        console.log(data);
-        console.log(peers);
-        console.log(peers[0]._id);
-        console.log(data.id);
-        peers.forEach(peer => {
-            peer.signal(data);
-        });
-        // const peer = peers.find(p => p._id === data.id);
-        // if (peer) {
-        //     peer.signal(data);
-        // }
-    };
-
-    const handleCandidate = (data) => {
-        console.log(13);
-        peers.forEach(peer => {
-            peer.signal(data);
-        });
-        // const peer = peers.find(p => p.signal(data));
-        // if (peer) {
-        //     peer.signal(data);
-        // }
-    };
-
-    const createNewPeer = (sdp) => {
-        console.log('handle new peer');
-        console.log('sdp');
-        console.log(sdp);
-        const peer = new Peer({
-            initiator: true,
-            trickle: false,
-            stream: stream
-        });
-        console.log(1);
-
-        peer.on('signal', data => {
-            console.log(2);
-            socket.current.send(JSON.stringify(data));
-        });
-
-        peer.on('stream', stream => {
-            console.log(3);
-            addRemoteVideo(stream);
-        });
-
-        console.log(4);
-        peer.signal({type: 'offer', sdp});
-
-        console.log(5);
-        setPeers(peers => [...peers, peer]);
-    };
+    const onAudioData = async (event) => {
+        // console.log(event.data.size);
+        if (audioSocket.current && audioSocket.current.readyState === WebSocket.OPEN && event.data.size > 0) {
+            // // console.log('got audio');
+            // // console.log(event.data);
+            // let blob;
+            if (!firstChunk.current) {
+                firstChunk.current = [event.data];
+            }
+            //     blob = new Blob([event.data], {type: 'audio/webm'})
+            // }
+            // else{
+            //     blob = new Blob([...firstChunk.current, event.data], {type: 'audio/webm'})
+            // }
+            // // console.log(blob);
+            // const audioUrl = window.URL.createObjectURL(blob);
+            // const audio = new Audio();
+            // audio.src = audioUrl;
+            // audio.addEventListener('canplaythrough', () => {
+            //     console.log('success');
+            //     audio.play();
+            //     // setProcessedAudios(audios => (
+            //     //     { ...audios, kostya: audioUrl }
+            //     // ));
+            //     // window.URL.revokeObjectURL(audioUrl); // Clean up the object URL
+            // });
+            sendCombinedData('1', event.data);
+        }
+    }
 
     const startCall = () => {
-        const peer = new Peer({
-            initiator: true,
-            trickle: false,
-            stream: stream
-        });
+        audioSocket.current = new WebSocket(WEBSOCKET_URL + '/audio/' + roomId.toString() + '/' + localStorage.getItem('token'));
+        videoSocket.current = new WebSocket(WEBSOCKET_URL + '/video/' + roomId.toString() + '/' + localStorage.getItem('token'));
+        audioSocket.current.binaryType = 'arraybuffer';
 
-        peer.on('signal', data => {
-            console.log('got signal');
-            console.log(data);
-            socket.current.send(JSON.stringify(data));
-        });
+        audioSocket.current.onmessage = handleMessage;
 
-        peer.on('stream', stream => {
-            console.log('got stream');
-            processedVideoRef.current.srcObject = stream;
-            // addRemoteVideo(stream);
-        });
+        audioSocket.current.onopen = () => {
+            const intervalId = setInterval(sendFrame, 100);
+            audioSocket.current.onclose = () => clearInterval(intervalId);
 
-        setPeers(peer);
+            const audioRecorder = new MediaRecorder(new MediaStream([stream.getAudioTracks()[0]]), {mimeType: 'audio/webm'});
+            audioRecorder.ondataavailable = onAudioData;
+            audioRecorder.start(100);
+        };
     };
-
-    const addRemoteVideo = (stream) => {
-        const videoElement = document.createElement('video');
-        videoElement.srcObject = stream;
-        videoElement.autoPlay = true;
-        videoElement.style.width = '300px';
-        document.getElementById('call-chat').appendChild(videoElement);
-    }
 
     return (
         <div className="full-height border-end" id="call-chat">
             Room {roomId}
             <div>
                 <video ref={videoRef} autoPlay muted style={{width: '300px'}}/>
-                <video ref={processedVideoRef} autoPlay style={{ width: '300px' }} />
+                <canvas ref={canvasRef} width="640" height="480" style={{display: 'none'}}></canvas>
+                {Object.entries(processedImages).map(([user_from, image]) => (
+                    <img key={user_from} src={image} alt={`{user_from}'s video`} style={{width: '300px'}}/>
+                ))}
+                {Object.entries(processedAudios).map(([user_from, audio]) => (
+                    <audio key={user_from} src={audio} style={{width: '300px'}} autoPlay/>
+                ))}
                 <button onClick={startCall}>Start Call</button>
             </div>
         </div>

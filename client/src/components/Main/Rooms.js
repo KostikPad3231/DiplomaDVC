@@ -21,7 +21,7 @@ export const RoomsList = (props) => {
         const fetchId = ++fetchIdRef.current;
         setLoading(true);
         try {
-            const response = await getRooms(user);
+            const response = await getRooms();
             if (fetchId === fetchIdRef.current) {
                 console.log(response.data);
                 setRooms(response.data.rooms);
@@ -38,6 +38,7 @@ export const RoomsList = (props) => {
 
     const handleCreate = async (values) => {
         try {
+            console.log(values);
             const response = await createRoom(values);
             if (response.status === 201) {
                 newMessage('Room was created successfully');

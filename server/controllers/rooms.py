@@ -22,7 +22,7 @@ async def get_rooms(db: AsyncSession, username: str):
     return rooms
 
 
-async def create(db: AsyncSession, room: schemes.RoomCreate, username: str):
+async def create(db: AsyncSession, room: schemes.RoomJoin, username: str):
     if await db.scalar(select(Room).where(Room.name == room.name)):
         raise HTTPException(
             status_code=HTTP_400_BAD_REQUEST,

@@ -1,6 +1,7 @@
 import json
 from typing import Annotated, List
 
+import numpy as np
 import socketio
 from fastapi import FastAPI, Depends, WebSocket
 from fastapi.security import OAuth2PasswordRequestForm
@@ -10,8 +11,6 @@ from starlette import status
 
 import cv2
 import asyncio
-from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
-from aiortc.contrib.media import MediaRelay
 from av import VideoFrame
 from starlette.websockets import WebSocketDisconnect
 
@@ -19,12 +18,16 @@ from controllers import users
 from controllers import auth
 from controllers import rooms
 from controllers import chat
+from controllers.auth import verify_access_token
 from logger import logger
 from models.database import get_async_session, with_db_session
 from models import schemes
 
+ngrok_url = 'https://7a9ca3364d9caca38f63105f87be3e18.serveo.net'
+
 origins = [
     'http://localhost:3000',
+    ngrok_url
 ]
 
 app = FastAPI()
@@ -41,55 +44,12 @@ app.add_middleware(
 
 # Chat
 
-# sio = socketio.AsyncServer(
-#     cors_allowed_origins=[],
-#     async_mode="asgi"
-# )
-# socket_app = socketio.ASGIApp(sio)
-# app.mount('/socket.io', socket_app)
-
-# Rtc
-
-relay = MediaRelay()
-
-
-class VideoTransformTrack(MediaStreamTrack):
-    kind = 'video'
-
-    def __init__(self, track, transform):
-        super().__init__()
-        self.track = track
-        self.transform = transform
-
-    async def recv(self):
-        frame = await self.track.recv()
-        if self.transform == 'cartoon':
-            img = frame.to_ndarray(format='bgr24')
-            img_color = cv2.pyrDown(cv2.pyrDown(img))
-            for _ in range(6):
-                img_color = cv2.bilateralFilter(img_color, 9, 9, 7)
-            img_color = cv2.pyrUp(cv2.pyrUp(img_color))
-
-            img_edges = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-            img_edges = cv2.adaptiveThreshold(
-                cv2.medianBlur(img_edges, 7),
-                255,
-                cv2.ADAPTIVE_THRESH_MEAN_C,
-                cv2.THRESH_BINARY,
-                9,
-                2
-            )
-            img_edges = cv2.cvtColor(img_edges, cv2.COLOR_GRAY2RGB)
-
-            img = cv2.bitwise_and(img_color, img_edges)
-
-            new_frame = VideoFrame.from_ndarray(img, format='bgr24')
-            new_frame.pts = frame.pts
-            new_frame.time_base = frame.time_base
-
-            return new_frame
-        else:
-            return frame
+sio = socketio.AsyncServer(
+    cors_allowed_origins=[],
+    async_mode="asgi"
+)
+socket_app = socketio.ASGIApp(sio)
+app.mount('/socket.io', socket_app)
 
 
 @app.post('/auth/register', status_code=status.HTTP_201_CREATED)
@@ -116,7 +76,7 @@ async def get_rooms(db: Annotated[AsyncSession, Depends(get_async_session)],
 
 
 @app.post('/api/rooms', status_code=status.HTTP_201_CREATED)
-async def create_room(room: schemes.RoomCreate, db: Annotated[AsyncSession, Depends(get_async_session)],
+async def create_room(room: schemes.RoomJoin, db: Annotated[AsyncSession, Depends(get_async_session)],
                       token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
     return await rooms.create(db=db, room=room, username=token.username)
 
@@ -127,127 +87,128 @@ async def join_room(room: schemes.RoomJoin, db: Annotated[AsyncSession, Depends(
     return await rooms.join_room(db=db, room_to_join=room, username=token.username)
 
 
-# @app.websocket("/ws/{room_id}")
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    logger.debug(1)
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: dict[str, list[tuple[WebSocket, str]]] = dict()
 
-    # if room_id not in rooms_connections:
-    #     logger.debug(2)
-    #     rooms_connections[room_id] = []
-    # rooms_connections[room_id].append(websocket)
+    async def connect(self, websocket: WebSocket, room_id: str, user_id: str):
+        await websocket.accept()
+        if room_id not in self.active_connections:
+            self.active_connections[room_id] = []
+        self.active_connections[room_id].append((websocket, user_id))
 
-    pcs = set()
+    def disconnect(self, websocket: WebSocket, room_id):
+        self.active_connections[room_id] = [
+            (ws, user_id)
+            for ws, user_id in self.active_connections[room_id]
+            if ws != websocket
+        ]
 
+
+class AudioConnectionManager(ConnectionManager):
+    async def broadcast(self, data: bytes, room_id: str, user_from: str):
+        user_from_bytes = user_from.encode('utf-8')
+        user_from_length = len(user_from_bytes)
+
+        message = bytearray()
+        message.extend(user_from_length.to_bytes())
+        message.extend(user_from_bytes)
+        message.extend(data)
+
+        for ws, _ in self.active_connections[room_id]:
+            await ws.send_bytes(message)
+
+
+class VideoConnectionManager(ConnectionManager):
+    async def broadcast(self, message: str, room_id: str, user_from: str):
+        for ws, _ in self.active_connections[room_id]:
+            await ws.send_text(json.dumps({
+                user_from: user_from,
+                message: message
+            }))
+
+
+audio_manager = AudioConnectionManager()
+video_manager = VideoConnectionManager()
+
+
+# def process_frame(data: bytes) -> bytes:
+#     nparr = np.frombuffer(data, np.uint8)
+#     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+#
+#     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+#     edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 5)
+#
+#     blurred = cv2.medianBlur(img, 3)
+#     cartoon = cv2.bitwise_and(blurred, blurred, mask=edges)
+#
+#     # img_color = cv2.pyrDown(cv2.pyrDown(img))
+#     # for _ in range(6):
+#     #     img_color = cv2.bilateralFilter(img_color, 9, 9, 7)
+#     # img_color = cv2.pyrUp(cv2.pyrUp(img_color))
+#     #
+#     # img_edges = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+#     # img_edges = cv2.adaptiveThreshold(
+#     #     cv2.medianBlur(img_edges, 7),
+#     #     255,
+#     #     cv2.ADAPTIVE_THRESH_MEAN_C,
+#     #     cv2.THRESH_BINARY,
+#     #     9,
+#     #     2
+#     # )
+#     # img_edges = cv2.cvtColor(img_edges, cv2.COLOR_GRAY2RGB)
+#     #
+#     # img = cv2.bitwise_and(img_color, img_edges)
+#     #
+#     _, img_encoded = cv2.imencode('.jpg', cartoon)
+#     return img_encoded.tobytes()
+#     # return data
+
+
+@app.websocket('/ws/audio/{room_id}/{token}')
+async def websock(websocket: WebSocket, room_id: str, token: str):
+    token = verify_access_token(token)
+    await audio_manager.connect(websocket, room_id, token.username)
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            await audio_manager.broadcast(data, room_id, token.username)
+    except WebSocketDisconnect:
+        audio_manager.disconnect(websocket, room_id)
+
+
+@app.websocket('/ws/video/{room_id}/{token}')
+async def websock(websocket: WebSocket, room_id: str, token: str):
+    token = verify_access_token(token)
+    await video_manager.connect(websocket, room_id, token.username)
     try:
         while True:
             data = await websocket.receive_text()
-            message = json.loads(data)
-
-            if message['type'] == 'offer':
-                pc = RTCPeerConnection()
-                pcs.add(pc)
-
-                @pc.on("datachannel")
-                def on_datachannel(channel):
-                    @channel.on("message")
-                    def on_message(message):
-                        logger.debug(f"Message received: {message}")
-                        channel.send("Response from server")
-
-                @pc.on('track')
-                def on_track(track):
-                    if track.kind == 'video':
-                        local_video = VideoTransformTrack(relay.subscribe(track), transform='cartoon')
-                        pc.addTrack(local_video)
-
-                offer = RTCSessionDescription(sdp=message['sdp'], type=message['type'])
-                await pc.setRemoteDescription(offer)
-
-                answer = await pc.createAnswer()
-                await pc.setLocalDescription(answer)
-
-                await websocket.send_text(json.dumps({
-                    'sdp': pc.localDescription.sdp,
-                    'type': pc.localDescription.type
-                }))
-
-                # for peer in rooms_connections[room_id]:
-                #     logger.debug(peer)
-                #     # if peer != websocket:
-                #     await peer.send_text(json.dumps({
-                #         'type': pc.localDescription.type,
-                #         'sdp': pc.localDescription.sdp,
-                #         # 'room_id': room_id
-                #     }))
-            elif 'candidate' in message:
-                candidate = message['candidate']
-                await pc.addIceCandidate(candidate)
-            # elif message['type'] == 'new-peer':
-            #     logger.debug(13)
-            #     new_pc = RTCPeerConnection()
-            #     pcs.add(new_pc)
-            #
-            #     @new_pc.on('icecandidate')
-            #     def on_icecandidate(candidate):
-            #         logger.debug(14)
-            #         websocket.send_text(json.dumps({'candidate': candidate}))
-            #
-            #     @new_pc.on('track')
-            #     def on_track(track):
-            #         logger.debug(15)
-            #         if track.kind == 'video':
-            #             logger.debug(16)
-            #             local_video = VideoTransformTrack(relay.subscribe(track), transform='cartoon')
-            #             new_pc.addTrack(local_video)
-            #
-            #     logger.debug(17)
-            #     offer = RTCSessionDescription(sdp=message['sdp'], type=message['type'])
-            #     await pc.setRemoteDescription(offer)
-            #
-            #     logger.debug(18)
-            #     answer = await pc.createAnswer()
-            #     await pc.setLocalDescription(answer)
-            #
-            #     logger.debug(19)
-            #     await websocket.send_text(json.dumps({
-            #         'sdp': pc.localDescription.sdp,
-            #         'type': pc.localDescription.type
-            #     }))
-    except WebSocketDisconnect as e:
-        logger.debug(e)
-        # rooms_connections[room_id].remove(websocket)
-        for pc in pcs:
-            await pc.close()
-        pcs.clear()
+            await video_manager.broadcast(data, room_id, token.username)
+    except WebSocketDisconnect:
+        video_manager.disconnect(websocket, room_id)
 
 
-# @sio.event
-# async def connect(sid, environ):
-#     room_id = environ['QUERY_STRING'].split('=')[1].split('&')[0]
-#     logger.debug(environ['QUERY_STRING'])
-#     logger.debug(f'connected to the room: {room_id}')
-#     await sio.enter_room(sid=sid, room=int(room_id))
-#
-#
-# @sio.on('messages:get')
-# @with_db_session
-# async def get_messages(sid, data, db: AsyncSession):
-#     logger.debug('get messages')
-#     logger.debug(data)
-#     messages = await chat.get_messages(db=db, room_id=data['roomId'])
-#     logger.debug(messages)
-#     await sio.emit('messages', data={'messages': messages.dict()}, room=data['roomId'])
-#
-#
-# @sio.on('message:send')
-# @with_db_session
-# async def send_message(sid, message: dict, db: AsyncSession):
-#     await chat.send_message(db, schemes.MessageCreate(
-#         text=message['text'],
-#         sender_username=message['sender_username'],
-#         room_id=message['room_id']
-#     ))
-#     messages = await chat.get_messages(db=db, room_id=message['room_id'])
-#     await sio.emit('messages', data={'messages': messages.dict()}, room=message['room_id'])
+@sio.event
+async def connect(sid, environ):
+    room_id = environ['QUERY_STRING'].split('=')[1].split('&')[0]
+    await sio.enter_room(sid=sid, room=int(room_id))
+
+
+@sio.on('messages:get')
+@with_db_session
+async def get_messages(sid, data, db: AsyncSession):
+    messages = await chat.get_messages(db=db, room_id=data['roomId'])
+    await sio.emit('messages', data={'messages': messages.dict()}, room=data['roomId'])
+
+
+@sio.on('message:send')
+@with_db_session
+async def send_message(sid, message: dict, db: AsyncSession):
+    await chat.send_message(db, schemes.MessageCreate(
+        text=message['text'],
+        sender_username=message['sender_username'],
+        room_id=message['room_id']
+    ))
+    messages = await chat.get_messages(db=db, room_id=message['room_id'])
+    await sio.emit('messages', data={'messages': messages.dict()}, room=message['room_id'])
