@@ -21,7 +21,7 @@ export const JoinRoomModal = ({show, setShow, handleJoin}) => {
     return (
         <Modal show={show} onHide={handleClose}>
             <Modal.Header closeButton>
-                <Modal.Title>Create room</Modal.Title>
+                <Modal.Title>Join room</Modal.Title>
             </Modal.Header>
             <Modal.Body>
                 {errors.detail && (

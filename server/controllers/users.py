@@ -1,4 +1,10 @@
-from fastapi import HTTPException, status
+import io
+import os
+import tempfile
+
+import torch.cuda
+import torchaudio
+from fastapi import HTTPException, status, UploadFile
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -8,6 +14,8 @@ from .auth import create_access_token
 from models.core import User
 from models import schemes
 from utils import get_password_hash, verify_password
+
+from logger import logger
 
 
 async def register(db: AsyncSession, user: schemes.UserCreate):
@@ -53,3 +61,30 @@ async def login(db: AsyncSession, form_data: OAuth2PasswordRequestForm):
         'access_token': access_token,
         'token_type': 'bearer'
     }
+
+
+async def upload_voice(db: AsyncSession, file: UploadFile, username: str, knn_vc):
+    if file.filename.split('.')[-1] != 'wav':
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Wrong file format'
+        )
+    user: User = await db.scalar(select(User).where(User.username == username))
+    if not user:
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail='Wrong user'
+        )
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
+        contents = await file.read()
+        temp_file.write(contents)
+        temp_file_path = temp_file.name
+    try:
+        matching_set = knn_vc.get_matching_set([temp_file_path])
+        buffer = io.BytesIO()
+        torch.save(matching_set, buffer)
+        user.preprocessed_voice_data = buffer.getvalue()
+        await db.commit()
+    finally:
+        os.remove(temp_file_path)
+        torch.cuda.empty_cache()

@@ -5,14 +5,6 @@ export const signUp = async (values) => {
     return axios.post(API_URL.SIGN_UP, {...values});
 };
 
-export const getMe = async () => {
-    return axios({
-        method: 'get',
-        url: API_URL.PROFILE,
-        headers: {Authorization: `Token ${localStorage.getItem("token")}`},
-    });
-};
-
 export const login = async values => {
     const formData = new FormData();
     formData.append('username', values.username);
@@ -20,10 +12,6 @@ export const login = async values => {
 
     return axios.post(API_URL.LOGIN, formData);
 };
-
-// export const login = async values => {
-//     return axios.post(API_URL.LOGIN, {...values});
-// };
 
 export const logout = async () => {
     return axios({
@@ -75,19 +63,13 @@ export const joinRoom = async (values) => {
     });
 };
 
-export const createMessage = async (values) => {
+export const uploadVoice = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
     return axios({
         method: 'post',
-        url: API_URL.SEND_MESSAGE,
+        url: API_URL.UPLOAD_VOICE,
         headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
-        data: values,
-    });
-};
-
-export const getRoomMessages = async (topicId, pageIndex) => {
-    return axios({
-        method: 'get',
-        url: API_URL.MESSAGES + topicId + `/posts/?page=${pageIndex + 1}`,
-        headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
+        data: formData
     });
 };

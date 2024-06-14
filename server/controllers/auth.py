@@ -56,5 +56,7 @@ async def get_current_user(db: Annotated[AsyncSession, Depends(get_async_session
                            token: Annotated[str, Depends(oauth2_scheme)]):
     logger.debug('get_current_user')
     token = verify_access_token(token)
+    logger.debug(1)
     user = await db.scalar(select(User).where(User.username == token.username))
+    logger.debug(2)
     return user

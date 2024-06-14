@@ -1,18 +1,16 @@
 import json
-from typing import Annotated, List
+from typing import Annotated
 
-import numpy as np
 import socketio
-from fastapi import FastAPI, Depends, WebSocket
+from fastapi import FastAPI, Depends, WebSocket, UploadFile, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
-import cv2
-import asyncio
-from av import VideoFrame
 from starlette.websockets import WebSocketDisconnect
+
+import torch
 
 from controllers import users
 from controllers import auth
@@ -23,7 +21,9 @@ from logger import logger
 from models.database import get_async_session, with_db_session
 from models import schemes
 
-ngrok_url = 'https://7a9ca3364d9caca38f63105f87be3e18.serveo.net'
+# knn_vc = torch.hub.load('bshall/knn-vc', 'knn_vc', prematched=True, trust_repo=True, pretrained=True, device='cuda')
+
+ngrok_url = 'https://782f2704cb37e311962eac07a46eda66.serveo.net'
 
 origins = [
     'http://localhost:3000',
@@ -87,20 +87,27 @@ async def join_room(room: schemes.RoomJoin, db: Annotated[AsyncSession, Depends(
     return await rooms.join_room(db=db, room_to_join=room, username=token.username)
 
 
+# @app.post('/api/upload-voice', status_code=status.HTTP_204_NO_CONTENT)
+# async def upload_voice(file: UploadFile, db: Annotated[AsyncSession, Depends(get_async_session)],
+#                        token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
+#     logger.debug(file.filename)
+#     return await users.upload_voice(db, file, token.username, knn_vc)
+
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: dict[str, list[tuple[WebSocket, str]]] = dict()
 
-    async def connect(self, websocket: WebSocket, room_id: str, user_id: str):
+    async def connect(self, websocket: WebSocket, room_id: str, username: str):
         await websocket.accept()
         if room_id not in self.active_connections:
             self.active_connections[room_id] = []
-        self.active_connections[room_id].append((websocket, user_id))
+        self.active_connections[room_id].append((websocket, username))
 
     def disconnect(self, websocket: WebSocket, room_id):
         self.active_connections[room_id] = [
-            (ws, user_id)
-            for ws, user_id in self.active_connections[room_id]
+            (ws, username)
+            for ws, username in self.active_connections[room_id]
             if ws != websocket
         ]
 
@@ -115,54 +122,22 @@ class AudioConnectionManager(ConnectionManager):
         message.extend(user_from_bytes)
         message.extend(data)
 
-        for ws, _ in self.active_connections[room_id]:
-            await ws.send_bytes(message)
+        for ws, username in self.active_connections[room_id]:
+            if username != user_from:
+                await ws.send_bytes(message)
 
-
-class VideoConnectionManager(ConnectionManager):
-    async def broadcast(self, message: str, room_id: str, user_from: str):
-        for ws, _ in self.active_connections[room_id]:
-            await ws.send_text(json.dumps({
-                user_from: user_from,
-                message: message
-            }))
+    async def disconnect(self, websocket: WebSocket, room_id):
+        for ws, username in self.active_connections[room_id]:
+            if ws != websocket:
+                await ws.send_text(json.dumps({
+                    'type': 'disconnect-user',
+                    'from': username
+                }))
+        super().disconnect(websocket, room_id)
 
 
 audio_manager = AudioConnectionManager()
-video_manager = VideoConnectionManager()
-
-
-# def process_frame(data: bytes) -> bytes:
-#     nparr = np.frombuffer(data, np.uint8)
-#     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-#
-#     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-#     edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 5)
-#
-#     blurred = cv2.medianBlur(img, 3)
-#     cartoon = cv2.bitwise_and(blurred, blurred, mask=edges)
-#
-#     # img_color = cv2.pyrDown(cv2.pyrDown(img))
-#     # for _ in range(6):
-#     #     img_color = cv2.bilateralFilter(img_color, 9, 9, 7)
-#     # img_color = cv2.pyrUp(cv2.pyrUp(img_color))
-#     #
-#     # img_edges = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-#     # img_edges = cv2.adaptiveThreshold(
-#     #     cv2.medianBlur(img_edges, 7),
-#     #     255,
-#     #     cv2.ADAPTIVE_THRESH_MEAN_C,
-#     #     cv2.THRESH_BINARY,
-#     #     9,
-#     #     2
-#     # )
-#     # img_edges = cv2.cvtColor(img_edges, cv2.COLOR_GRAY2RGB)
-#     #
-#     # img = cv2.bitwise_and(img_color, img_edges)
-#     #
-#     _, img_encoded = cv2.imencode('.jpg', cartoon)
-#     return img_encoded.tobytes()
-#     # return data
+video_manager = ConnectionManager()
 
 
 @app.websocket('/ws/audio/{room_id}/{token}')
@@ -183,8 +158,21 @@ async def websock(websocket: WebSocket, room_id: str, token: str):
     await video_manager.connect(websocket, room_id, token.username)
     try:
         while True:
-            data = await websocket.receive_text()
-            await video_manager.broadcast(data, room_id, token.username)
+            message = await websocket.receive_json()
+            if message['type'] == 'join':
+                for ws, user in video_manager.active_connections[room_id]:
+                    if ws != websocket:
+                        await ws.send_text(json.dumps({'type': 'new-user', 'from': token.username}))
+                await websocket.send_text(json.dumps({
+                    'type': 'users',
+                    'users': [user for _, user in video_manager.active_connections[room_id] if user != token.username]
+                }))
+            elif message['type'] == 'signal':
+                logger.debug(message)
+                for ws, user in video_manager.active_connections[room_id]:
+                    if user == message['to']:
+                        await ws.send_text(json.dumps(message))
+                        break
     except WebSocketDisconnect:
         video_manager.disconnect(websocket, room_id)
 
