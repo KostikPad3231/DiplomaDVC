@@ -1,13 +1,11 @@
 import {useEffect, useRef, useState} from 'react';
-import {WaveFile} from 'wavefile';
 import Peer from 'simple-peer';
 import {WEBSOCKET_URL} from "../constants";
 
-import {MediaRecorder, register} from 'extendable-media-recorder';
-import {connect} from 'extendable-media-recorder-wav-encoder';
+import {FaMicrophoneAlt, FaVideo, FaMicrophoneAltSlash, FaVideoSlash} from "react-icons/fa";
+
 // import {socket} from "../socket";
 
-await register(await connect());
 
 export const Room = ({user, roomId}) => {
     const [peers, setPeers] = useState({});
@@ -15,24 +13,42 @@ export const Room = ({user, roomId}) => {
 
     const [stream, setStream] = useState(null);
     const videoRef = useRef(null);
-    const canvasRef = useRef();
-    const audioSocket = useRef();
-    const videoSocket = useRef();
-    const firstChunk = useRef(null);
-    const wav = useRef(new WaveFile());
+    const audioSocket = useRef(null);
+    const videoSocket = useRef(null);
 
     const [isCalling, setIsCalling] = useState(false);
+    const [playVideo, setPlayVideo] = useState(true);
+    const [playAudio, setPlayAudio] = useState(true);
+    const playAudioRef = useRef(true);
 
-    const uint8ArrayToBlob = (uint8Array) => {
-        wav.current.fromScratch(1, 16000, '16', uint8Array);
+    const audioContextRef = useRef(null);
+    const mediaStreamSourceRef = useRef(null);
+    const audioProcessorRef = useRef(null);
 
-        const wavBuffer = wav.current.toBuffer();
-
-        return new Blob([wavBuffer], {type: 'audio/wav'});
-    }
+    const leaveCall = () => {
+        if (audioSocket.current) {
+            audioSocket.current.close();
+        }
+        if (videoSocket.current) {
+            videoSocket.current.close();
+        }
+        if (peersRef.current) {
+            setPeers({});
+            peersRef.current = {};
+        }
+        if (mediaStreamSourceRef.current) {
+            mediaStreamSourceRef.current.disconnect();
+            mediaStreamSourceRef.current = null;
+        }
+        if (audioProcessorRef.current) {
+            audioProcessorRef.current.disconnect();
+            audioProcessorRef.current.onaudioprocess = null;
+            audioProcessorRef.current = null;
+        }
+    };
 
     useEffect(() => {
-        navigator.mediaDevices.getUserMedia({video: true, audio: {sampleRate: 16000}})
+        navigator.mediaDevices.getUserMedia({video: true, audio: true})
             .then((stream) => {
                 setStream(stream);
                 if (videoRef.current) {
@@ -42,42 +58,46 @@ export const Room = ({user, roomId}) => {
             .catch((error) => {
                 console.log(`Error accessing media devices: ${error}`)
             });
-
         return () => {
-            if (audioSocket.current) {
-                console.log('closing socket');
-                audioSocket.current.close();
-                videoSocket.current.close();
-            }
+            leaveCall();
         }
     }, [roomId]);
 
+    // useEffect(() => {
+    //     if (playVideo) {
+    //         navigator.mediaDevices.getUserMedia({video: true, audio: {sampleRate: 16000}})
+    //             .then((stream) => {
+    //                 setStream(stream);
+    //                 if (videoRef.current) {
+    //                     videoRef.current.srcObject = stream;
+    //                 }
+    //             })
+    //             .catch((error) => {
+    //                 console.log(`Error accessing media devices: ${error}`)
+    //             });
+    //     } else {
+    //         if (stream) {
+    //             stream.getTracks().forEach(track => track.stop());
+    //         }
+    //     }
+    // }, [playVideo]);
+
     const handleAudioMessage = async (message) => {
-        const data = new Uint8Array(message.data);
-        const userFromLength = data[0];
-        const userFrom = new TextDecoder().decode(data.slice(1, 1 + userFromLength));
-        const contentStart = 1 + userFromLength;
-        const content = data.slice(contentStart);
+        const dataView = new DataView(message.data);
+        const userFromLength = dataView.getUint8(0);
+        const userFrom = new TextDecoder().decode(message.data.slice(1, 1 + userFromLength));
+        const float32Array = new Float32Array(message.data.slice(1 + userFromLength));
 
-        // const blob = new Blob([content], {type: 'audio/webm'})
-        // const blob = new Blob([...firstChunk.current, content], {type: 'audio/wav'});
-        const blob = uint8ArrayToBlob(content);
-        const audioUrl = URL.createObjectURL(blob);
-        const audio = new Audio(audioUrl);
-        await audio.play();
-
-        // const reader = new FileReader();
-        //
-        // reader.onload = () => {
-        //     audioContext.decodeAudioData(reader.result, (buffer) => {
-        //         const source = audioContext.createBufferSource();
-        //         source.buffer = buffer;
-        //         source.connect(audioContext.destination);
-        //         source.start(0);
-        //     });
-        // };
-        //
-        // reader.readAsArrayBuffer(blob);
+        // const float32Array = new Float32Array(audioData.length);
+        // for (let i = 0; i < audioData.length; i++) {
+        //     float32Array[i] = audioData[i] / 0x7FFF;
+        // }
+        const audioBuffer = audioContextRef.current.createBuffer(1, float32Array.length, audioContextRef.current.sampleRate);
+        audioBuffer.getChannelData(0).set(float32Array);
+        const bufferSource = audioContextRef.current.createBufferSource();
+        bufferSource.buffer = audioBuffer;
+        bufferSource.connect(audioContextRef.current.destination);
+        bufferSource.start();
     }
 
     const handleVideoMessage = async (message) => {
@@ -98,7 +118,7 @@ export const Room = ({user, roomId}) => {
             const peer = new Peer({
                 initiator: false,
                 trickle: false,
-                stream: stream
+                stream: new MediaStream([stream.getVideoTracks()[0]])
             });
 
             peer.on('signal', signal => {
@@ -110,16 +130,20 @@ export const Room = ({user, roomId}) => {
                 }));
             });
 
-            peersRef.current = {...peersRef, [data.from]: peer};
+            peersRef.current = {...peersRef.current, [data.from]: peer};
             setPeers(prevPeers => ({...prevPeers, [data.from]: peer}));
         } else if (data.type === 'disconnect-user') {
-            peersRef.current[data.from].destroy();
-            delete peersRef.current[data.from];
-            setPeers(prevPeers => {
-                const newPeers = {...prevPeers};
-                delete newPeers[data.from];
-                return newPeers;
-            });
+            console.log(`disconnected user ${data.from}`);
+            console.log(peersRef.current);
+            if (peersRef.current[data.from]) {
+                peersRef.current[data.from].destroy();
+                delete peersRef.current[data.from];
+                setPeers(prevPeers => {
+                    const newPeers = {...prevPeers};
+                    delete newPeers[data.from];
+                    return newPeers;
+                });
+            }
         }
     }
 
@@ -127,7 +151,7 @@ export const Room = ({user, roomId}) => {
         const peer = new Peer({
             initiator: true,
             trickle: false,
-            stream
+            stream: new MediaStream([stream.getVideoTracks()[0]])
         });
 
         peer.on('signal', signal => {
@@ -143,71 +167,112 @@ export const Room = ({user, roomId}) => {
     };
 
     const onAudioData = async (event) => {
-        // console.log(event.data);
-        if (audioSocket.current && audioSocket.current.readyState === WebSocket.OPEN && event.data.size > 0) {
-            if (!firstChunk.current) {
-                console.log(1);
-                console.log(await event.data.arrayBuffer());
-                // console.log(new Uint8Array(event.data));
-                firstChunk.current = [event.data.slice(0, 40)];
-                const dec = new TextDecoder('utf-8')
-                console.log(dec.decode(await event.data.slice(0, 40).arrayBuffer()));
-                return;
-            }
+        if (!playAudioRef.current) return;
 
-            audioSocket.current.send(event.data);
-        }
+        const audioData = event.inputBuffer.getChannelData(0);
+        const float32Array = new Float32Array(audioData);
+        // const int16Array = new Int16Array(audioData.length);
+        // for (let i = 0; i < audioData.length; i++) {
+        //     int16Array[i] = Math.min(1, audioData[i]) * 0x7FFF;
+        // }
+        audioSocket.current.send(float32Array.buffer);
     }
 
-    const hancleClick = () => {
+    const handleCallClick = () => {
         if (!isCalling) {
+            if (playVideo) {
+                videoSocket.current = new WebSocket(WEBSOCKET_URL + '/video/' + roomId.toString() + '/' + localStorage.getItem('token'));
+                videoSocket.current.onmessage = handleVideoMessage;
+
+                videoSocket.current.onopen = () => {
+                    videoSocket.current.send(JSON.stringify({type: 'join'}))
+                };
+            }
+            if (playAudio) {
+                startAudioSocket();
+            }
             setIsCalling(true);
-            audioSocket.current = new WebSocket(WEBSOCKET_URL + '/audio/' + roomId.toString() + '/' + localStorage.getItem('token'));
-            audioSocket.current.binaryType = 'arraybuffer';
-
-            audioSocket.current.onmessage = handleAudioMessage;
-
-            audioSocket.current.onopen = () => {
-                const audioRecorder = new MediaRecorder(new MediaStream([stream.getAudioTracks()[0]]), {mimeType: 'audio/wav'});
-                audioRecorder.ondataavailable = onAudioData;
-                audioRecorder.start(100);
-            };
-
-            videoSocket.current = new WebSocket(WEBSOCKET_URL + '/video/' + roomId.toString() + '/' + localStorage.getItem('token'));
-            videoSocket.current.onmessage = handleVideoMessage;
-
-            videoSocket.current.onopen = () => {
-                videoSocket.current.send(JSON.stringify({type: 'join'}))
-            };
         } else {
+            leaveCall();
             setIsCalling(false);
-            audioSocket.current.close();
-            videoSocket.current.close();
-            Object.entries(peers.current).map((username, peer) => {
-                peer.destroy();
-            });
         }
+    };
+
+    const startVideoSocket = () => {
+
+    }
+
+    const startAudioSocket = () => {
+        audioSocket.current = new WebSocket(WEBSOCKET_URL + '/audio/' + roomId.toString() + '/' + localStorage.getItem('token'));
+        audioSocket.current.binaryType = 'arraybuffer';
+
+        audioSocket.current.onmessage = handleAudioMessage;
+
+        audioSocket.current.onopen = () => {
+            audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({sampleRate: 16000});
+            console.log(audioContextRef.current.sampleRate);
+            mediaStreamSourceRef.current = audioContextRef.current.createMediaStreamSource(new MediaStream([stream.getAudioTracks()[0]]));
+            audioProcessorRef.current = audioContextRef.current.createScriptProcessor(16384, 1, 1);
+            mediaStreamSourceRef.current.connect(audioProcessorRef.current);
+            audioProcessorRef.current.connect(audioContextRef.current.destination);
+
+            audioProcessorRef.current.onaudioprocess = onAudioData;
+        };
+    };
+
+    const onPlayVideoClick = () => {
+        const videoTrack = stream.getVideoTracks()[0];
+        console.log(!playVideo);
+        // Object.entries(peers).forEach(([username, peer]) => {
+        //     peer.removeTrack(videoTrack);
+        // });
+        videoTrack.enabled = !playVideo;
+        setPlayVideo(!playVideo);
+    };
+
+    const onPlayAudioClick = () => {
+        if(audioSocket.current === null){
+            startAudioSocket();
+        }
+        playAudioRef.current = !playAudioRef.current;
+        setPlayAudio(!playAudio);
     };
 
     return (
         <div className="full-height border-end" id="call-chat">
             Room {roomId}
+            {}
+            {/*<Button type="danger">Delete room</Button>*/}
             <div>
-                <video ref={videoRef} autoPlay muted style={{width: '300px'}}/>
-                <canvas ref={canvasRef} width="640" height="480" style={{display: 'none'}}></canvas>
+                <div className="my-video-container" style={{width: '300px', height: '225px'}}>
+                    <video
+                        ref={videoRef}
+                        autoPlay
+                        muted
+                        style={{width: '300px'}}
+                    />
+                    <div className="d-flex justify-content-center meet-icon-container">
+                        <div onClick={onPlayAudioClick}>
+                            {playAudio ?
+                                <FaMicrophoneAlt/> :
+                                <FaMicrophoneAltSlash/>
+                            }
+                        </div>
+                        <div onClick={onPlayVideoClick}>
+                            {playVideo ?
+                                <FaVideo/> :
+                                <FaVideoSlash/>
+                            }
+                        </div>
+                    </div>
+                </div>
                 {Object.entries(peers).map(([username, peer]) => {
                     return <Video key={username} peer={peer}/>
                 })}
-                {/*{Object.entries(processedImages).map(([user_from, image]) => (*/}
-                {/*    <img key={user_from} src={image} alt={`{user_from}'s video`} style={{width: '300px'}}/>*/}
-                {/*))}*/}
-                {/*{Object.entries(processedAudios).map(([user_from, audio]) => (*/}
-                {/*    <audio key={user_from} src={audio} style={{width: '300px'}} autoPlay/>*/}
-                {/*))}*/}
-                <button onClick={hancleClick}>
+                <button onClick={handleCallClick}>
                     {isCalling ?
-                        'Start Call' :
-                        'Leave'
+                        'Leave' :
+                        'Start Call'
                     }
                 </button>
             </div>

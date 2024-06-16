@@ -56,13 +56,13 @@ export const Main = (props) => {
                     </Col>
                     {!roomId ? (
                         <Col className="full-height">
-                            {/*<Row>*/}
-                            {/*    {voiceIsLoading ? (*/}
-                            {/*        <p>Loading...</p>*/}
-                            {/*    ) : (*/}
-                            {/*        <UploadVoice handleUploadVoice={handleUploadVoice}/>*/}
-                            {/*    )}*/}
-                            {/*</Row>*/}
+                            <Row>
+                                {voiceIsLoading ? (
+                                    <p>Loading...</p>
+                                ) : (
+                                    <UploadVoice handleUploadVoice={handleUploadVoice}/>
+                                )}
+                            </Row>
                             <Row>
                                 Nothing here
                             </Row>

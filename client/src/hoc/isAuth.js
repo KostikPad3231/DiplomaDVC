@@ -7,7 +7,7 @@ const checkToken = async () => {
     try {
         const response = await verifyToken();
         if (response.status === 200) {
-            return response.data.current_user;
+            return response.data;
         } else {
             return false;
         }

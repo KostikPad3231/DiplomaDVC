@@ -1,10 +1,14 @@
+import io
 import json
 from typing import Annotated
 
+import numpy as np
 import socketio
+import torchaudio.functional
 from fastapi import FastAPI, Depends, WebSocket, UploadFile, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
@@ -18,12 +22,13 @@ from controllers import rooms
 from controllers import chat
 from controllers.auth import verify_access_token
 from logger import logger
+from models.core import User
 from models.database import get_async_session, with_db_session
 from models import schemes
 
 # knn_vc = torch.hub.load('bshall/knn-vc', 'knn_vc', prematched=True, trust_repo=True, pretrained=True, device='cuda')
 
-ngrok_url = 'https://782f2704cb37e311962eac07a46eda66.serveo.net'
+ngrok_url = 'https://90d094d626c811d2466fb9b81654bf73.serveo.net'
 
 origins = [
     'http://localhost:3000',
@@ -63,9 +68,9 @@ async def login_user(form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     return await users.login(db=db, form_data=form_data)
 
 
-@app.get('/api/get-user')
+@app.get('/api/get-user', response_model=schemes.User)
 async def get_current_user(current_user: Annotated[schemes.User, Depends(auth.get_current_user)]):
-    return {'current_user': current_user}
+    return current_user
 
 
 @app.get('/api/rooms', response_model=schemes.RoomList)
@@ -81,6 +86,12 @@ async def create_room(room: schemes.RoomJoin, db: Annotated[AsyncSession, Depend
     return await rooms.create(db=db, room=room, username=token.username)
 
 
+@app.delete('/api/rooms', status_code=status.HTTP_204_NO_CONTENT)
+async def delete_room(room_id: int, db: Annotated[AsyncSession, Depends(get_async_session)],
+                      token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
+    return await rooms.delete_room(db=db, room_id=room_id, username=token.username)
+
+
 @app.post('/api/rooms/join', status_code=status.HTTP_204_NO_CONTENT)
 async def join_room(room: schemes.RoomJoin, db: Annotated[AsyncSession, Depends(get_async_session)],
                     token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
@@ -90,7 +101,6 @@ async def join_room(room: schemes.RoomJoin, db: Annotated[AsyncSession, Depends(
 # @app.post('/api/upload-voice', status_code=status.HTTP_204_NO_CONTENT)
 # async def upload_voice(file: UploadFile, db: Annotated[AsyncSession, Depends(get_async_session)],
 #                        token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
-#     logger.debug(file.filename)
 #     return await users.upload_voice(db, file, token.username, knn_vc)
 
 
@@ -104,7 +114,7 @@ class ConnectionManager:
             self.active_connections[room_id] = []
         self.active_connections[room_id].append((websocket, username))
 
-    def disconnect(self, websocket: WebSocket, room_id):
+    async def disconnect(self, websocket: WebSocket, room_id, user_from):
         self.active_connections[room_id] = [
             (ws, username)
             for ws, username in self.active_connections[room_id]
@@ -113,43 +123,65 @@ class ConnectionManager:
 
 
 class AudioConnectionManager(ConnectionManager):
+    def __init__(self):
+        super().__init__()
+        self.matching_set = None
+
+    async def set_matching_set(self, db: AsyncSession, username='kostya'):
+        user = await db.scalar(select(User).where(User.username == username))
+        self.matching_set = torch.load(io.BytesIO(user.preprocessed_voice_data))
+
     async def broadcast(self, data: bytes, room_id: str, user_from: str):
         user_from_bytes = user_from.encode('utf-8')
         user_from_length = len(user_from_bytes)
+
+        # audio_np = np.frombuffer(data, dtype=np.float32)
+        # audio_tensor = torch.tensor(audio_np, device='cuda')
+        #
+        # query_sentence = knn_vc.get_features(audio_tensor)
+        #
+        # logger.debug(query_sentence.size())
+        # logger.debug(self.matching_set.size())
+        # out_wav = knn_vc.match(query_sentence, self.matching_set, topk=4)
 
         message = bytearray()
         message.extend(user_from_length.to_bytes())
         message.extend(user_from_bytes)
         message.extend(data)
+        # message.extend(out_wav.cpu().numpy().tobytes())
 
         for ws, username in self.active_connections[room_id]:
             if username != user_from:
                 await ws.send_bytes(message)
 
-    async def disconnect(self, websocket: WebSocket, room_id):
+
+class VideoConnectionManager(ConnectionManager):
+    async def disconnect(self, websocket: WebSocket, room_id, user_from):
         for ws, username in self.active_connections[room_id]:
-            if ws != websocket:
+            if username != user_from:
                 await ws.send_text(json.dumps({
                     'type': 'disconnect-user',
-                    'from': username
+                    'from': user_from
                 }))
-        super().disconnect(websocket, room_id)
+        await super().disconnect(websocket, room_id, user_from)
 
 
 audio_manager = AudioConnectionManager()
-video_manager = ConnectionManager()
+video_manager = VideoConnectionManager()
 
 
 @app.websocket('/ws/audio/{room_id}/{token}')
-async def websock(websocket: WebSocket, room_id: str, token: str):
+async def websock(websocket: WebSocket, room_id: str, token: str, db: Annotated[AsyncSession, Depends(get_async_session)]):
     token = verify_access_token(token)
     await audio_manager.connect(websocket, room_id, token.username)
+    await audio_manager.set_matching_set(db)
     try:
         while True:
             data = await websocket.receive_bytes()
+            # logger.debug(f'received from {token.username}')
             await audio_manager.broadcast(data, room_id, token.username)
     except WebSocketDisconnect:
-        audio_manager.disconnect(websocket, room_id)
+        await audio_manager.disconnect(websocket, room_id, token.username)
 
 
 @app.websocket('/ws/video/{room_id}/{token}')
@@ -174,7 +206,7 @@ async def websock(websocket: WebSocket, room_id: str, token: str):
                         await ws.send_text(json.dumps(message))
                         break
     except WebSocketDisconnect:
-        video_manager.disconnect(websocket, room_id)
+        await video_manager.disconnect(websocket, room_id, token.username)
 
 
 @sio.event

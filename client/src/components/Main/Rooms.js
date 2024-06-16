@@ -1,10 +1,12 @@
-import {useContext, useEffect, useRef, useState} from "react";
+import {useContext, useEffect, useRef, useState} from 'react';
 import {AddCircleOutline, CreateOutline} from 'react-ionicons';
+import {FaTrashAlt} from 'react-icons/fa';
 
 import {MessageContext} from '../MessageContext';
 import {createRoom, getRooms, joinRoom} from "../../api/requests";
-import {CreateRoomModal} from "./CreateRoomModal";
-import {JoinRoomModal} from "./JoinRoomModal";
+import {CreateRoomModal} from './CreateRoomModal';
+import {JoinRoomModal} from './JoinRoomModal';
+import {Button} from "react-bootstrap";
 
 export const RoomsList = (props) => {
     const user = props.user;
@@ -14,6 +16,7 @@ export const RoomsList = (props) => {
     const [rooms, setRooms] = useState([]);
     const [loading, setLoading] = useState(false);
     const fetchIdRef = useRef(0);
+    const [contextMenu, setContextMenu] = useState({visible: false, x: 0, y: 0, roomId: null});
 
     const {newMessage} = useContext(MessageContext);
 
@@ -73,14 +76,32 @@ export const RoomsList = (props) => {
 
     const handleShowCreate = () => {
         setShowCreate(true);
-    }
+    };
 
     const handleShowJoin = () => {
         setShowJoin(true);
+    };
+
+    const handleContextMenu = (event, roomId) => {
+        event.preventDefault();
+        setContextMenu({
+            visible: true,
+            x: event.clientX,
+            y: event.clientY,
+            roomId
+        });
+    };
+
+    const handleTrashClick = () => {
+        console.log(contextMenu.roomId);
+    };
+
+    const handleClickOutside = () => {
+        setContextMenu({visible: false, x: 0, y: 0});
     }
 
     return (
-        <div className="d-flex flex-column full-height border-end">
+        <div className="d-flex flex-column full-height border-end" onClick={handleClickOutside}>
             {loading ? (
                 <div>Loading...</div>
             ) : (
@@ -92,6 +113,8 @@ export const RoomsList = (props) => {
                             return (
                                 <div key={room.id} style={{cursor: 'pointer'}} onClick={() => {
                                     setRoomId(room.id);
+                                }} onContextMenu={(event) => {
+                                    handleContextMenu(event, room.id);
                                 }}>
                                     {room.name}
                                 </div>
@@ -122,6 +145,19 @@ export const RoomsList = (props) => {
             </div>
             <CreateRoomModal show={showCreate} setShow={setShowCreate} handleCreate={handleCreate}/>
             <JoinRoomModal show={showJoin} setShow={setShowJoin} handleJoin={handleJoin}/>
+
+            {contextMenu.visible && (
+                <Button variant="danger" onClick={handleTrashClick}
+                        style={{
+                            position: 'absolute',
+                            top: contextMenu.y,
+                            left: contextMenu.x,
+                            zIndex: 1000
+                        }}
+                >
+                    <FaTrashAlt/>
+                </Button>
+            )}
         </div>
     );
 };

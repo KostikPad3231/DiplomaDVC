@@ -8,7 +8,34 @@ html, body, #root, .App, .full-height {
     height: 100%;
 }
 
-#chat-list{
+#chat-list {
     flex: 1;
     overflow-y: scroll;
+}
+
+/*.video-container {*/
+/*    position: relative;*/
+/*    display: inline-block;*/
+/*}*/
+
+/*video {*/
+/*    display: block;*/
+/*}*/
+
+.my-video-container {
+    position: relative;
+}
+
+.meet-icon-container {
+    width: 100%;
+    top: 100%;
+    transform: translate(0, -100%);
+    padding-bottom: 5px;
+    position: absolute;
+}
+
+.meet-icon-container > div {
+    font-size: 14pt;
+    cursor: pointer;
+    margin: 0 10px;
 }

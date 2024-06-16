@@ -81,6 +81,7 @@ async def upload_voice(db: AsyncSession, file: UploadFile, username: str, knn_vc
         temp_file_path = temp_file.name
     try:
         matching_set = knn_vc.get_matching_set([temp_file_path])
+        logger.debug(matching_set.size())
         buffer = io.BytesIO()
         torch.save(matching_set, buffer)
         user.preprocessed_voice_data = buffer.getvalue()

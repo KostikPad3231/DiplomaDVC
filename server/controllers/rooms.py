@@ -17,7 +17,10 @@ from utils import get_password_hash, verify_password
 async def get_rooms(db: AsyncSession, username: str):
     logger.debug(username)
     user = await db.scalar(select(User).where(User.username == username).options(selectinload(User.rooms)))
-    rooms = user.rooms if user else []
+    rooms = [{'id': room.id,
+              'name': room.name,
+              'is_creator': room.creator_id == user.id
+              } for room in user.rooms] if user else []
 
     return rooms
 
@@ -70,4 +73,22 @@ async def join_room(db: AsyncSession, room_to_join: schemes.RoomJoin, username: 
         raise credentials_error
 
     room.users.append(user)
+    await db.commit()
+
+
+async def delete_room(db: AsyncSession, room_id: int, username: str):
+    room = await db.scalar(select(Room).where(Room.id == room_id))
+    if not room:
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail='Wrong room'
+        )
+    user = await db.scalar(select(User).where(User.username == username))
+    wrong_user_exception = HTTPException(
+        status_code=HTTP_400_BAD_REQUEST,
+        detail='Wrong user'
+    )
+    if not user or user.id != room.creator_id:
+        raise wrong_user_exception
+    await db.delete(room)
     await db.commit()

@@ -35,6 +35,7 @@ class TokenData(BaseModel):
 class Room(BaseModel):
     id: int | None
     name: str
+    is_creator: bool
 
 
 class RoomJoin(BaseModel):
