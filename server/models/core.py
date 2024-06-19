@@ -1,40 +1,38 @@
 from datetime import datetime, timezone
-from typing import List
 
-from sqlalchemy import Column, Integer, ForeignKey, String, TIMESTAMP, LargeBinary, Table, Text
-from sqlalchemy.orm import DeclarativeBase, relationship, Mapped
+from sqlalchemy import Column, Integer, ForeignKey, String, TIMESTAMP, LargeBinary, Table, Text, Boolean
+from sqlalchemy.orm import DeclarativeBase, relationship
 
 
 class Base(DeclarativeBase):
     pass
 
 
-# class RoomUser(Base):
-#     __tablename__ = 'UserRoom'
-#
-#     id = Column(Integer, primary_key=True)
-#     room_id = Column(ForeignKey("Room.id"), primary_key=True),
-#     user_id = Column(ForeignKey("User.id"), primary_key=True),
+class RoomUser(Base):
+    __tablename__ = 'RoomUser'
+
+    room_id = Column(ForeignKey('Room.id', ondelete='CASCADE'), nullable=False, primary_key=True)
+    user_id = Column(ForeignKey('User.id', ondelete='CASCADE'), nullable=False, primary_key=True)
+    victories = Column(Integer, default=0)
+    last_score = Column(Integer, default=0)
+
+    room = relationship('Room', back_populates='room_users', foreign_keys=[room_id], viewonly=True)
+    user = relationship('User', back_populates='room_users', foreign_keys=[user_id], viewonly=True)
 
 
-RoomUser = Table(
-    'RoomUser',
-    Base.metadata,
-    Column('id', Integer, primary_key=True),
-    Column('room_id', ForeignKey('Room.id', ondelete='CASCADE')),
-    Column('user_id', ForeignKey('User.id', ondelete='CASCADE')),
-    Column('victories', Integer)
-)
+class ActivityUser(Base):
+    __tablename__ = 'ActivityUser'
 
-ActivityUser = Table(
-    'ActivityUser',
-    Base.metadata,
-    Column('id', Integer, primary_key=True),
-    Column('activity_id', ForeignKey('Activity.id', ondelete='CASCADE')),
-    Column('user_id', ForeignKey('User.id', ondelete='CASCADE')),
-    Column('other_voice_user_id', ForeignKey('User.id', ondelete='SET NULL')),
-    Column('right_answers', Integer)
-)
+    activity_id = Column(ForeignKey('Activity.id', ondelete='CASCADE'), nullable=False, primary_key=True)
+    user_id = Column(ForeignKey('User.id', ondelete='CASCADE'), nullable=False, primary_key=True)
+    other_voice_user_id = Column(ForeignKey('User.id', ondelete='SET NULL'))
+
+    refused_participation = Column(Boolean, default=False)
+    right_answers = Column(Integer, default=-1)
+
+    activity = relationship('Activity', back_populates='activity_users', foreign_keys=[activity_id], viewonly=True)
+    user = relationship('User', back_populates='activity_users', foreign_keys=[user_id], viewonly=True)
+    other_voice_user = relationship('User', foreign_keys=[other_voice_user_id])
 
 
 class User(Base):
@@ -46,14 +44,18 @@ class User(Base):
     registered_at = Column(TIMESTAMP, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     preprocessed_voice_data = Column(LargeBinary)
 
-    created_rooms = relationship('Room', back_populates='creator')
-    rooms = relationship('Room', secondary=RoomUser, back_populates='users')
+    created_rooms = relationship('Room', back_populates='creator', cascade='all, delete-orphan')
+
+    room_users = relationship(RoomUser, back_populates='user', foreign_keys=[RoomUser.user_id], viewonly=True)
+    rooms = relationship('Room', secondary='RoomUser', back_populates='users')
 
     messages = relationship('Message', back_populates='sender')
 
-    activities = relationship('Activity', secondary=ActivityUser, back_populates='users',
-                              primaryjoin='User.id == ActivityUser.c.user_id',
-                              secondaryjoin='Activity.id == ActivityUser.c.activity_id')
+    activity_users = relationship('ActivityUser', back_populates='user', foreign_keys=[ActivityUser.user_id],
+                                  viewonly=True)
+    activities = relationship('Activity', secondary='ActivityUser', back_populates='users',
+                              primaryjoin='User.id == ActivityUser.user_id',
+                              secondaryjoin='Activity.id == ActivityUser.activity_id')
 
 
 class Room(Base):
@@ -63,14 +65,15 @@ class Room(Base):
     name = Column(String(50), unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
 
-    creator_id = Column(ForeignKey('User.id', ondelete='CASCADE'))
+    creator_id = Column(ForeignKey('User.id', ondelete='CASCADE'), nullable=False)
     creator = relationship('User', back_populates='created_rooms')
 
-    users = relationship('User', secondary=RoomUser, back_populates='rooms')
+    room_users = relationship(RoomUser, back_populates='room', foreign_keys=[RoomUser.room_id], viewonly=True)
+    users = relationship('User', secondary='RoomUser', back_populates='rooms')
 
-    messages = relationship('Message', back_populates='room')
+    messages = relationship('Message', back_populates='room', cascade='all, delete-orphan')
 
-    activity = relationship('Activity', back_populates='room')
+    activity = relationship('Activity', back_populates='room', uselist=False, cascade='all, delete-orphan')
 
 
 class Message(Base):
@@ -80,7 +83,7 @@ class Message(Base):
     text = Column(Text)
     sent_at = Column(TIMESTAMP, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
-    room_id = Column(ForeignKey('Room.id', ondelete='CASCADE'))
+    room_id = Column(ForeignKey('Room.id', ondelete='CASCADE'), nullable=False)
     room = relationship('Room', back_populates='messages')
 
     sender_id = Column(ForeignKey('User.id', ondelete='SET NULL'))
@@ -92,11 +95,13 @@ class Activity(Base):
 
     id = Column(Integer, primary_key=True)
 
-    room_id = Column(ForeignKey('Room.id', ondelete='CASCADE'))
-    room = relationship('Room', back_populates='activity')
+    room_id = Column(ForeignKey('Room.id', ondelete='CASCADE'), unique=True, nullable=False)
+    room = relationship('Room', back_populates='activity', single_parent=True, uselist=False)
 
-    users = relationship('User', secondary=ActivityUser, back_populates='activities',
-                         primaryjoin='Activity.id == ActivityUser.c.activity_id',
-                         secondaryjoin='User.id == ActivityUser.c.user_id')
+    activity_users = relationship('ActivityUser', back_populates='activity', foreign_keys=[ActivityUser.activity_id],
+                                  viewonly=True)
+    users = relationship('User', secondary='ActivityUser', back_populates='activities',
+                         primaryjoin='Activity.id == ActivityUser.activity_id',
+                         secondaryjoin='User.id == ActivityUser.user_id')
 
     created_at = Column(TIMESTAMP, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

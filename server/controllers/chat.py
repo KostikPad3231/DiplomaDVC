@@ -57,3 +57,21 @@ async def send_message(db: AsyncSession, message: schemes.MessageCreate):
     )
     db.add(new_message)
     await db.commit()
+
+
+async def delete_message(db: AsyncSession, message_id: int, username: str):
+    message = await db.scalar(select(Message).where(Message.id == message_id))
+    if not message:
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail='Wrong message'
+        )
+    user = await db.scalar(select(User).where(User.username == username))
+    wrong_user_exception = HTTPException(
+        status_code=HTTP_400_BAD_REQUEST,
+        detail='Wrong user'
+    )
+    if not user or user.id != message.sender_id:
+        raise wrong_user_exception
+    await db.delete(message)
+    await db.commit()

@@ -13,7 +13,7 @@ export const useChat = ({user, roomId}) => {
         });
 
         socketRef.current.emit('messages:get', {
-            roomId
+            room_id: roomId
         });
 
         socketRef.current.on('messages', ({messages}) => {
@@ -31,12 +31,12 @@ export const useChat = ({user, roomId}) => {
         }
     }, [user, roomId]);
 
-    const sendMessage = ({username, text}) => {
+    const sendMessage = (username, text) => {
         socketRef.current.emit('message:send', {text, 'sender_username': username, 'room_id': roomId});
     };
 
-    const deleteMessage = (id) => {
-        socketRef.current.emit('message:delete', id);
+    const deleteMessage = (username, id, roomId) => {
+        socketRef.current.emit('message:delete', {'message_id': id, 'room_id': roomId, username});
     };
 
     return {messages, sendMessage, deleteMessage}

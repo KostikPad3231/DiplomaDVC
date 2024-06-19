@@ -1,8 +1,8 @@
 """Init
 
-Revision ID: 4ba5e52ca5e3
+Revision ID: 4e7f3d1946ee
 Revises: 
-Create Date: 2024-05-31 12:55:52.800821
+Create Date: 2024-06-17 13:55:08.279301
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '4ba5e52ca5e3'
+revision: str = '4e7f3d1946ee'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -33,22 +33,24 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('name', sa.String(length=50), nullable=False),
     sa.Column('hashed_password', sa.String(), nullable=False),
-    sa.Column('creator_id', sa.Integer(), nullable=True),
+    sa.Column('creator_id', sa.Integer(), nullable=False),
     sa.ForeignKeyConstraint(['creator_id'], ['User.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_Room_name'), 'Room', ['name'], unique=True)
     op.create_table('Activity',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('room_id', sa.Integer(), nullable=True),
+    sa.Column('room_id', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.TIMESTAMP(), nullable=True),
     sa.ForeignKeyConstraint(['room_id'], ['Room.id'], ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('room_id')
     )
     op.create_table('Message',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('text', sa.Text(), nullable=True),
     sa.Column('sent_at', sa.TIMESTAMP(), nullable=True),
-    sa.Column('room_id', sa.Integer(), nullable=True),
+    sa.Column('room_id', sa.Integer(), nullable=False),
     sa.Column('sender_id', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['room_id'], ['Room.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['sender_id'], ['User.id'], ondelete='SET NULL'),
@@ -56,23 +58,23 @@ def upgrade() -> None:
     )
     op.create_table('RoomUser',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('room_id', sa.Integer(), nullable=True),
-    sa.Column('user_id', sa.Integer(), nullable=True),
+    sa.Column('room_id', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.Integer(), nullable=False),
     sa.Column('victories', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['room_id'], ['Room.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['user_id'], ['User.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('ActivityUser',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('activity_id', sa.Integer(), nullable=True),
-    sa.Column('user_id', sa.Integer(), nullable=True),
+    sa.Column('activity_id', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.Integer(), nullable=False),
     sa.Column('other_voice_user_id', sa.Integer(), nullable=True),
+    sa.Column('refused_participation', sa.Boolean(), nullable=True),
     sa.Column('right_answers', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['activity_id'], ['Activity.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['other_voice_user_id'], ['User.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['user_id'], ['User.id'], ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('activity_id', 'user_id')
     )
     # ### end Alembic commands ###
 

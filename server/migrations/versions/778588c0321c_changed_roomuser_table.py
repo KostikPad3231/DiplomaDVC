@@ -1,8 +1,8 @@
-"""Added activity column
+"""Changed RoomUser table
 
-Revision ID: aba35fc1e947
-Revises: d057caa6c631
-Create Date: 2024-06-01 11:01:08.798324
+Revision ID: 778588c0321c
+Revises: 757aaed7f562
+Create Date: 2024-06-19 05:46:28.002956
 
 """
 from typing import Sequence, Union
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'aba35fc1e947'
-down_revision: Union[str, None] = 'd057caa6c631'
+revision: str = '778588c0321c'
+down_revision: Union[str, None] = '757aaed7f562'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

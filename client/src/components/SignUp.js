@@ -29,7 +29,6 @@ export const SignUp = () => {
         <>
             <Card className="w-25 mx-auto my-3">
                 <Card.Header>
-                    <h3>Sign up as a reader</h3>
                     {errors.non_field_errors && (
                         <p className="link-danger">{errors.non_field_errors}</p>
                     )}

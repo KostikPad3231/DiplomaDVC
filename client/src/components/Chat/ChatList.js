@@ -1,9 +1,11 @@
-import {useEffect, useRef} from "react";
+import {useEffect, useRef, useState} from "react";
 import {ListGroup} from "react-bootstrap";
 import {ChatListMessage} from "./ChatListMessage";
 
-export const ChatList = ({messages, deleteMessage}) => {
+export const ChatList = ({username, roomId, messages, deleteMessage}) => {
     const messagesEndRef = useRef(null);
+
+    console.log(messages);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({
@@ -15,9 +17,9 @@ export const ChatList = ({messages, deleteMessage}) => {
         <ListGroup variant="flush" id="chat-list">
             {messages.map((message) => (
                 <ChatListMessage
-                    key={message.messageId}
+                    key={message.id}
                     message={message}
-                    deleteMessage={deleteMessage}
+                    deleteMessage={async () => await deleteMessage(username, message.id, roomId)}
                 />
             ))}
             <span ref={messagesEndRef}></span>

@@ -30,8 +30,7 @@ export const ChatForm = ({user, sendMessage}) => {
             const trimmedText = text.trim();
             if (trimmedText) {
                 console.log('trimmed:', text, user.username);
-                const response = await sendMessage({'username': user.username, text});
-                console.log(response);
+                await sendMessage(user.username, text);
                 setText('');
             }
         } catch (error) {

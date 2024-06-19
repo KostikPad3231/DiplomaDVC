@@ -1,5 +1,7 @@
 import io
 import json
+from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Annotated
 
 import numpy as np
@@ -11,31 +13,50 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
-
 from starlette.websockets import WebSocketDisconnect
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import torch
 
-from controllers import users
-from controllers import auth
-from controllers import rooms
-from controllers import chat
+from controllers import users, auth, rooms, chat, activities
 from controllers.auth import verify_access_token
-from logger import logger
-from models.core import User
+from models.core import User, Room
 from models.database import get_async_session, with_db_session
 from models import schemes
 
-# knn_vc = torch.hub.load('bshall/knn-vc', 'knn_vc', prematched=True, trust_repo=True, pretrained=True, device='cuda')
+knn_vc = torch.hub.load('bshall/knn-vc', 'knn_vc', prematched=True, trust_repo=True, pretrained=True, device='cuda')
 
-ngrok_url = 'https://90d094d626c811d2466fb9b81654bf73.serveo.net'
+ngrok_url = '*'
 
 origins = [
     'http://localhost:3000',
     ngrok_url
 ]
 
-app = FastAPI()
+
+async def update_activities():
+    async for db in get_async_session():
+        all_rooms = await db.scalars(select(Room))
+        for room in all_rooms:
+            logger.debug(f'changing activity in room {room.name}')
+            await activities.create_activity(db, room.id)
+        await db.commit()
+
+
+scheduler = AsyncIOScheduler()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await update_activities()
+    scheduler.start()
+    scheduler.add_job(update_activities, 'cron', hour=0, minute=0)
+    yield
+    scheduler.shutdown()
+
+
+app = FastAPI(lifespan=lifespan)
+# app = FastAPI()
 
 rooms_connections = {}
 
@@ -68,6 +89,12 @@ async def login_user(form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     return await users.login(db=db, form_data=form_data)
 
 
+@app.delete('/auth', status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(db: Annotated[AsyncSession, Depends(get_async_session)],
+                         token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
+    return await users.delete_account(db=db, username=token.username)
+
+
 @app.get('/api/get-user', response_model=schemes.User)
 async def get_current_user(current_user: Annotated[schemes.User, Depends(auth.get_current_user)]):
     return current_user
@@ -80,13 +107,21 @@ async def get_rooms(db: Annotated[AsyncSession, Depends(get_async_session)],
     return {'rooms': room_list}
 
 
+@app.get('/api/rooms/{room_id}/leaderboard', response_model=schemes.Leaderboard)
+async def get_room_leaderboard(room_id: int, db: Annotated[AsyncSession, Depends(get_async_session)],
+                               token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
+    last_winner, leaderboard = await rooms.get_leaderboard(db=db, room_id=room_id)
+    return {'leaderboard': leaderboard,
+            'last_winner': last_winner}
+
+
 @app.post('/api/rooms', status_code=status.HTTP_201_CREATED)
 async def create_room(room: schemes.RoomJoin, db: Annotated[AsyncSession, Depends(get_async_session)],
                       token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
     return await rooms.create(db=db, room=room, username=token.username)
 
 
-@app.delete('/api/rooms', status_code=status.HTTP_204_NO_CONTENT)
+@app.delete('/api/rooms/{room_id}', status_code=status.HTTP_204_NO_CONTENT)
 async def delete_room(room_id: int, db: Annotated[AsyncSession, Depends(get_async_session)],
                       token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
     return await rooms.delete_room(db=db, room_id=room_id, username=token.username)
@@ -98,10 +133,53 @@ async def join_room(room: schemes.RoomJoin, db: Annotated[AsyncSession, Depends(
     return await rooms.join_room(db=db, room_to_join=room, username=token.username)
 
 
-# @app.post('/api/upload-voice', status_code=status.HTTP_204_NO_CONTENT)
-# async def upload_voice(file: UploadFile, db: Annotated[AsyncSession, Depends(get_async_session)],
-#                        token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
-#     return await users.upload_voice(db, file, token.username, knn_vc)
+@app.post('/api/rooms/{room_id}/leave', status_code=status.HTTP_204_NO_CONTENT)
+async def leave_room(room_id: int, db: Annotated[AsyncSession, Depends(get_async_session)],
+                     token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
+    return await rooms.leave_room(db=db, room_id=room_id, username=token.username)
+
+
+@app.get('/api/rooms/voices/{room_id}')
+async def get_voices(room_id: int, db: Annotated[AsyncSession, Depends(get_async_session)],
+                     token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
+    return await rooms.get_voices(db=db, room_id=room_id)
+
+
+@app.post('/api/activities/join', response_model=schemes.ActivityGetWithVoices)
+async def join_activity(activity: schemes.ActivityJoin, db: Annotated[AsyncSession, Depends(get_async_session)],
+                        token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
+    logger.debug(activity)
+    return await activities.join_activity(db=db, activity=activity, username=token.username)
+
+
+@app.post('/api/activities/leave', status_code=status.HTTP_204_NO_CONTENT)
+async def leave_activity(data: dict, db: Annotated[AsyncSession, Depends(get_async_session)],
+                         token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
+    return await activities.leave_activity(db=db, activity_id=data['activity_id'], username=token.username)
+
+
+@app.post('/api/upload-voice', status_code=status.HTTP_204_NO_CONTENT)
+async def upload_voice(file: UploadFile, db: Annotated[AsyncSession, Depends(get_async_session)],
+                       token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
+    return await users.upload_voice(db, file, token.username, knn_vc)
+
+
+@app.post('/api/change-voice', status_code=status.HTTP_204_NO_CONTENT)
+async def change_voice(room_id: str, user_to: str, db: Annotated[AsyncSession, Depends(get_async_session)],
+                       token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
+    return await audio_manager.set_matching_set(db, room_id, token.username, user_to)
+
+
+@app.get('/api/get-participants/{activity_id}')
+async def get_activity_participants(activity_id: int, db: Annotated[AsyncSession, Depends(get_async_session)],
+                                    token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
+    return await activities.get_activity_participants(db, activity_id, username=token.username)
+
+
+@app.post('/api/activities/vote')
+async def vote(voting: schemes.ActivityVote, db: Annotated[AsyncSession, Depends(get_async_session)],
+               token: Annotated[schemes.TokenData, Depends(auth.verify_token)]):
+    return await activities.vote(db, voting, token.username)
 
 
 class ConnectionManager:
@@ -118,41 +196,49 @@ class ConnectionManager:
         self.active_connections[room_id] = [
             (ws, username)
             for ws, username in self.active_connections[room_id]
-            if ws != websocket
+            if username != user_from
         ]
 
 
 class AudioConnectionManager(ConnectionManager):
     def __init__(self):
         super().__init__()
-        self.matching_set = None
+        self.matching_sets: dict[str, dict[str, torch.Tensor | None]] = dict()
 
-    async def set_matching_set(self, db: AsyncSession, username='kostya'):
-        user = await db.scalar(select(User).where(User.username == username))
-        self.matching_set = torch.load(io.BytesIO(user.preprocessed_voice_data))
+    async def set_matching_set(self, db: AsyncSession, room_id, from_username, to_username):
+        user = await db.scalar(select(User).where(User.username == to_username))
+        if user:
+            if room_id not in self.matching_sets:
+                self.matching_sets[room_id] = dict()
+            self.matching_sets[room_id][from_username] = torch.load(io.BytesIO(user.preprocessed_voice_data))
+        else:
+            self.matching_sets[room_id][from_username] = None
 
     async def broadcast(self, data: bytes, room_id: str, user_from: str):
         user_from_bytes = user_from.encode('utf-8')
         user_from_length = len(user_from_bytes)
 
-        # audio_np = np.frombuffer(data, dtype=np.float32)
-        # audio_tensor = torch.tensor(audio_np, device='cuda')
-        #
-        # query_sentence = knn_vc.get_features(audio_tensor)
-        #
-        # logger.debug(query_sentence.size())
-        # logger.debug(self.matching_set.size())
-        # out_wav = knn_vc.match(query_sentence, self.matching_set, topk=4)
+        if self.matching_sets.get(room_id, None) and user_from in self.matching_sets[room_id] and self.matching_sets[room_id][user_from] is not None:
+            audio_np = np.frombuffer(data, dtype=np.float32)
+            audio_tensor = torch.tensor(audio_np, device='cuda')
+
+            query_sentence = knn_vc.get_features(audio_tensor)
+
+            out_wav = knn_vc.match(query_sentence, self.matching_sets[room_id][user_from], topk=4)
+            data = out_wav.cpu().numpy().tobytes()
 
         message = bytearray()
         message.extend(user_from_length.to_bytes())
         message.extend(user_from_bytes)
         message.extend(data)
-        # message.extend(out_wav.cpu().numpy().tobytes())
 
         for ws, username in self.active_connections[room_id]:
             if username != user_from:
                 await ws.send_bytes(message)
+
+    async def disconnect(self, websocket: WebSocket, room_id, user_from):
+        del self.matching_sets[room_id][user_from]
+        await super().disconnect(websocket, room_id, user_from)
 
 
 class VideoConnectionManager(ConnectionManager):
@@ -171,10 +257,14 @@ video_manager = VideoConnectionManager()
 
 
 @app.websocket('/ws/audio/{room_id}/{token}')
-async def websock(websocket: WebSocket, room_id: str, token: str, db: Annotated[AsyncSession, Depends(get_async_session)]):
+async def websock(websocket: WebSocket, user_to: str | None, room_id: str, token: str,
+                  db: Annotated[AsyncSession, Depends(get_async_session)]):
     token = verify_access_token(token)
     await audio_manager.connect(websocket, room_id, token.username)
-    await audio_manager.set_matching_set(db)
+    logger.debug('User to')
+    logger.debug(user_to)
+    if user_to:
+        await audio_manager.set_matching_set(db, room_id, token.username, user_to)
     try:
         while True:
             data = await websocket.receive_bytes()
@@ -217,9 +307,9 @@ async def connect(sid, environ):
 
 @sio.on('messages:get')
 @with_db_session
-async def get_messages(sid, data, db: AsyncSession):
-    messages = await chat.get_messages(db=db, room_id=data['roomId'])
-    await sio.emit('messages', data={'messages': messages.dict()}, room=data['roomId'])
+async def get_messages(sid, data: dict, db: AsyncSession):
+    messages = await chat.get_messages(db=db, room_id=data['room_id'])
+    await sio.emit('messages', data={'messages': messages.dict()}, room=data['room_id'])
 
 
 @sio.on('message:send')
@@ -230,5 +320,14 @@ async def send_message(sid, message: dict, db: AsyncSession):
         sender_username=message['sender_username'],
         room_id=message['room_id']
     ))
+    messages = await chat.get_messages(db=db, room_id=message['room_id'])
+    await sio.emit('messages', data={'messages': messages.dict()}, room=message['room_id'])
+
+
+@sio.on('message:delete')
+@with_db_session
+async def delete_message(sid, message: dict, db: AsyncSession):
+    logger.debug(message)
+    await chat.delete_message(db, message['message_id'], message['username'])
     messages = await chat.get_messages(db=db, room_id=message['room_id'])
     await sio.emit('messages', data={'messages': messages.dict()}, room=message['room_id'])

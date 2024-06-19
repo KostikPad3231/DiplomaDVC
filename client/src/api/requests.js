@@ -13,10 +13,10 @@ export const login = async values => {
     return axios.post(API_URL.LOGIN, formData);
 };
 
-export const logout = async () => {
+export const deleteAccount = async () => {
     return axios({
-        method: 'post',
-        url: API_URL.LOG_OUT,
+        method: 'delete',
+        url: API_URL.DELETE_ACCOUNT,
         headers: {Authorization: `Bearer ${localStorage.getItem("token")}`},
     });
 };
@@ -37,10 +37,18 @@ export const getRooms = async () => {
     });
 };
 
+export const getRoomLeaderboard = async (roomId) => {
+    return axios({
+        method: 'get',
+        url: API_URL.ROOMS + `${roomId}/leaderboard`,
+        headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
+    });
+};
+
 export const deleteRoom = async (roomId) => {
     return axios({
         method: 'delete',
-        url: API_URL.ROOMS + roomId + '/',
+        url: API_URL.ROOMS + roomId,
         headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
     });
 };
@@ -63,6 +71,32 @@ export const joinRoom = async (values) => {
     });
 };
 
+export const leaveRoom = async (roomId) => {
+    return axios({
+        method: 'post',
+        url: API_URL.ROOMS + `${roomId}/leave`,
+        headers: {Authorization: `Bearer ${localStorage.getItem('token')}`}
+    });
+};
+
+export const joinActivity = async (values) => {
+    return axios({
+        method: 'post',
+        url: API_URL.JOIN_ACTIVITY,
+        headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
+        data: values,
+    })
+}
+
+export const leaveActivity = async (values) => {
+    return axios({
+        method: 'post',
+        url: API_URL.LEAVE_ACTIVITY,
+        headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
+        data: values,
+    })
+}
+
 export const uploadVoice = async (file) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -71,5 +105,38 @@ export const uploadVoice = async (file) => {
         url: API_URL.UPLOAD_VOICE,
         headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
         data: formData
+    });
+};
+
+export const getVoices = async (roomId) => {
+    return axios({
+        method: 'get',
+        url: API_URL.GET_VOICES + roomId.toString(),
+        headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
+    });
+};
+
+export const changeVoice = async (roomId, userTo) => {
+    return axios({
+        method: 'post',
+        url: API_URL.CHANGE_VOICE + `?room_id=${roomId}&user_to=${userTo}`,
+        headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
+    });
+};
+
+export const getActivityParticipants = async (activityId) => {
+    return axios({
+        method: 'get',
+        url: API_URL.GET_ACTIVITY_PARTICIPANTS + activityId.toString(),
+        headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
+    });
+};
+
+export const vote = async (activityId, votes) => {
+    return axios({
+        method: 'post',
+        url: API_URL.VOTE,
+        headers: {Authorization: `Bearer ${localStorage.getItem('token')}`},
+        data: {activity_id: activityId, votes}
     });
 };

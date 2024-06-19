@@ -89,3 +89,14 @@ async def upload_voice(db: AsyncSession, file: UploadFile, username: str, knn_vc
     finally:
         os.remove(temp_file_path)
         torch.cuda.empty_cache()
+
+
+async def delete_account(db: AsyncSession, username: str):
+    user: User = await db.scalar(select(User).where(User.username == username))
+    if not user:
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail='Wrong user'
+        )
+    await db.delete(user)
+    await db.commit()

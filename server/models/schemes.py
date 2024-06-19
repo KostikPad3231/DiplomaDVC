@@ -35,7 +35,6 @@ class TokenData(BaseModel):
 class Room(BaseModel):
     id: int | None
     name: str
-    is_creator: bool
 
 
 class RoomJoin(BaseModel):
@@ -43,10 +42,45 @@ class RoomJoin(BaseModel):
     password: str
 
 
+class ActivityJoin(BaseModel):
+    room_id: int
+    activity_id: int
+
+
+class ActivityGet(BaseModel):
+    activity_id: int | None
+    is_participating: bool
+    refused_participation: bool
+    dropped_voice_username: str | None
+    can_vote: bool
+
+
+class ActivityGetWithVoices(BaseModel):
+    activity_id: int | None
+    is_participating: bool
+    refused_participation: bool
+    dropped_voice_username: str | None
+    voices: list[str]
+
+
+class ActivityVote(BaseModel):
+    activity_id: int
+    votes: dict[str, str]
+
+
+class Leaderboard(BaseModel):
+    last_winner: tuple[str, int]
+    leaderboard: list[tuple[str, int]]
+
+
+class RoomGet(Room, ActivityGet):
+    is_creator: bool
+
+
 class RoomList(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    rooms: list[Room]
+    rooms: list[RoomGet]
 
 
 class BaseMessage(BaseModel):
@@ -71,9 +105,3 @@ class MessagesList(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     messages: list[MessageGet]
-
-
-class Offer(BaseModel):
-    sdp: str
-    type: str
-    video_transform: str | None

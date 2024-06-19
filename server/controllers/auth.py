@@ -40,6 +40,9 @@ def verify_access_token(token: str) -> schemes.TokenData:
         username = payload.get('username')
         if username is None:
             raise credentials_exception
+        exp = payload.get('exp')
+        if exp is None or exp < datetime.now(timezone.utc).timestamp():
+            raise credentials_exception
         token_data = schemes.TokenData(username=username)
     except JWTError:
         raise credentials_exception

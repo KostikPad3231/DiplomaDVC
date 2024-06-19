@@ -1,8 +1,8 @@
-"""Fixed activities
+"""Change defualt value in right answers
 
-Revision ID: bf505585c70f
-Revises: aba35fc1e947
-Create Date: 2024-06-01 11:19:21.960003
+Revision ID: b5f9a47a31ff
+Revises: e0f0fd24c07b
+Create Date: 2024-06-18 10:28:51.415420
 
 """
 from typing import Sequence, Union
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'bf505585c70f'
-down_revision: Union[str, None] = 'aba35fc1e947'
+revision: str = 'b5f9a47a31ff'
+down_revision: Union[str, None] = 'e0f0fd24c07b'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

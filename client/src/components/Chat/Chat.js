@@ -8,6 +8,8 @@ export const Chat = ({user, roomId}) => {
     return (
         <>
             <ChatList
+                roomId={roomId}
+                username={user.username}
                 messages={messages}
                 deleteMessage={deleteMessage}
             />

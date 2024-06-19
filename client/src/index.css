@@ -39,3 +39,15 @@ html, body, #root, .App, .full-height {
     cursor: pointer;
     margin: 0 10px;
 }
+
+.chat-control {
+    background-color: rgba(112, 112, 112, 0.5);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    text-align: center;
+}
+
+.chat-control-offed{
+    background-color: rgba(255, 0, 0, 0.5);
+}
