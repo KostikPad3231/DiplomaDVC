@@ -17,7 +17,7 @@ from starlette.websockets import WebSocketDisconnect
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import torch
-
+from logger import logger
 from controllers import users, auth, rooms, chat, activities
 from controllers.auth import verify_access_token
 from models.core import User, Room
@@ -43,20 +43,20 @@ async def update_activities():
         await db.commit()
 
 
-scheduler = AsyncIOScheduler()
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await update_activities()
-    scheduler.start()
-    scheduler.add_job(update_activities, 'cron', hour=0, minute=0)
-    yield
-    scheduler.shutdown()
-
-
-app = FastAPI(lifespan=lifespan)
-# app = FastAPI()
+# scheduler = AsyncIOScheduler()
+#
+#
+# @asynccontextmanager
+# async def lifespan(app: FastAPI):
+#     await update_activities()
+#     scheduler.start()
+#     scheduler.add_job(update_activities, 'cron', hour=0, minute=0)
+#     yield
+#     scheduler.shutdown()
+#
+#
+# app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 rooms_connections = {}
 

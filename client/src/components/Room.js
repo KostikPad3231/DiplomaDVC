@@ -91,16 +91,17 @@ export const Room = ({user, room, fetchRooms}) => {
         }
     };
 
-    useEffect(() => {
-        const fetchVoices = async () => {
-            try {
-                const response = await getVoices(roomId);
-                setVoices(response.data ? response.data : []);
-                console.log(voices);
-            } catch (error) {
-                console.log(error);
-            }
+    const fetchVoices = async () => {
+        try {
+            const response = await getVoices(roomId);
+            setVoices(response.data ? response.data : []);
+            console.log(voices);
+        } catch (error) {
+            console.log(error);
         }
+    };
+
+    useEffect(() => {
         fetchVoices();
         setIsParticipating(room.is_participating);
         setRefusedParticipation(room.refused_participation);
@@ -243,7 +244,7 @@ export const Room = ({user, room, fetchRooms}) => {
                 audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({sampleRate: 16000});
                 console.log(audioContextRef.current.sampleRate);
                 mediaStreamSourceRef.current = audioContextRef.current.createMediaStreamSource(new MediaStream([stream.getAudioTracks()[0]]));
-                audioProcessorRef.current = audioContextRef.current.createScriptProcessor(16384, 1, 1);
+                audioProcessorRef.current = audioContextRef.current.createScriptProcessor(8192, 1, 1);
                 mediaStreamSourceRef.current.connect(audioProcessorRef.current);
                 audioProcessorRef.current.connect(audioContextRef.current.destination);
 
